@@ -1,4 +1,5 @@
 Case Data Analyst Senior:
+Link Github: https://github.com/lgbizzi/CaseDataAnalystSenior_Autos-Code-Assessment
 - Com base na documentação que foi informada "Autos Code Assessment";
 - Com o objetivo de desenvolver um sistema de IA que analisa os dados de vendas, relacionados a:
 	-> Veículos;
@@ -310,13 +311,13 @@ CREATE INDEX IX_BRZ_VV_VENDEDOR
 5 - Desenvolvimento de Agente de IA (LLM - OpenAI) para análise dos dados armazenados:
 	-> Através de Langchain, conforme sugerido
 	-> Indexados no final do Arquivo;
-	-> Disponíveis no Github;
+	-> Disponíveis no Github (https://github.com/lgbizzi/CaseDataAnalystSenior_Autos-Code-Assessment);
 	-> Para validação, fiz algumas perguntas (prints)
 
 6 - Desenvolvimento de visualizações interativas:
 	-> Através de Streamlit, conforme sugerido;
 	-> Indexados no final do Arquivo;
-	-> Disponíveis no Github;
+	-> Disponíveis no Github (https://github.com/lgbizzi/CaseDataAnalystSenior_Autos-Code-Assessment);
 	-> Inserir prints das telas;
 
 
@@ -431,3 +432,4 @@ etl_autos_code/
 
 Comando para rodar Streamlit:
 streamlit run streamlit_app/app.py
+
