@@ -1,0 +1,433 @@
+Case Data Analyst Senior:
+- Com base na documentação que foi informada "Autos Code Assessment";
+- Com o objetivo de desenvolver um sistema de IA que analisa os dados de vendas, relacionados a:
+	-> Veículos;
+	-> Peças;
+	-> Serviços;
+	-> Inventório;
+- Tracei um plano de ação para auxiliar nas abordagens:
+	1 - Identificar padrões de vendas e tendências de serviços;
+	2 - Prever necessidades de estoque e reduzir ineficiências operacionais;
+	3 - Gerar insights para apoiar na tomada de decisão para a gestão;
+	4 - Entregar relatórios automatizados, sumarizando insights em linguagem natural, através de APIs OpenAI;
+
+
+Em anexo está o plano de ação tratado, pensando em uma implementação em equipe, ao longo de algumas semanas de Projeto.
+		-> Pensando na Arquitetura medalhão, com as camadas:
+			* BRONZE (Armazenamento de dados brutos);
+			* SILVER (Armazenamento de dados limpos, tratados e organizados);
+			* GOLD (Armazenamento de dados relacionados e enriquecidos);
+
+Como não seria possível implementar todos os pontos previstos, dentro do prazo de resolução do Case, para o desenvolvimento do MVP, foquei nos pontos:
+	1 - Entendimento do Dicionário de Dados (Data Overview) apresentado, em relação a estrutura dos arquivos .csv;
+	2 - Através de Docker Container, montar um Banco de Dados (BD) Oracle para armazenamento dos dados;
+	3 - Com base no Dicionário de Dados (Data Overview), criar as tabelas no Banco de Dados Oracle;
+	4 - Desenvolvimento de automações para ETL dos dados, em Python;
+		-> Devido ao tempo para resolução do case;
+		-> Apliquei alguns tratamentos de inconsistências de dados nessa etapa:
+			* Acentuação quebrada;
+			* Campos de "Cod_Concessionaria" e "Cod_Filial" ausentes em algumas bases;
+			* "Cod_Filial" fora do padrão (estava com tipo data);
+		-> Foram feitos antes de subir ao Banco de Dados;
+
+	5 - Desenvolvimento de Agente de IA (LLM - OpenAI) para análise dos dados armazenados:
+		-> Desenvolvimento em Python;
+		-> Uso de bibliotecas Langchain;
+		-> Através de API OpenAI;
+		-> Conectado ao BD Oracle criado;
+
+	6 - Desenvolvimento de visualizações interativas:
+		-> Desenvolvimento em Python;
+		-> Uso de Streamlit;
+		-> Conectado ao BD Oracle criado;
+
+
+1 - Entendimento do Dicionário de Dados (Data Overview) apresentado, em relação a estrutura dos arquivos .csv;
+#### 1.1 Estoque de Veículos
+- **Valores nulos:** 10 registros em colunas críticas
+- **Duplicatas:** 3 registros duplicados
+- **Estrutura:** Colunas repetidas (Data_de_Entrada aparece 3 vezes)
+- **Ação:** Limpeza, remoção de duplicatas, deduplicate colunas
+
+#### 1.2 Histórico de Vendas de Veículos
+- **Valores nulos:** 41.772 nulos (coluna "Unnamed: 27" - vazia)
+- **Duplicatas:** 1.417 registros duplicados
+- **Margem anômala:** 1,14% muito baixa (investigar cálculos)
+- **Ação:** Remover coluna vazia, deduplicar, validar fórmulas
+
+#### 1.3 Histórico de Serviços
+- **Lucro > Receita:** 114% de margem CRÍTICO
+- **Possível causa:** Lucro acumulado ou estrutura diferente
+- **Ação:** Investigação urgente da semântica dos dados
+
+#### 1.4 Estoque de Peças
+- **Status:** Limpo (sem problemas aparentes)
+- **Validação necessária:** Datas, campos de obsolescência
+- **Ação:** Confirmar campos críticos, validar ranges
+
+#### 1.5 Histórico de Vendas de Peças
+- **Margens anômalas:** Peças com lucro negativo ou margem >100%
+- **Zeros:** Custo da peça zerado em registros (verificar se correto)
+- **Negativas:** Transações negativas (devoluções/cancelamentos não claramente marcadas)
+- **Incoerências:** Mesmo item com custos diferentes por filial/período
+- **Vendedor/Comprador:** Alguns registros com mesmo nome (venda interna?)
+- **Ação:** Padronizar margens por canal, investigar negativas, validar custo
+
+
+
+2 - Através de Docker Container, montar um Banco de Dados (BD) Oracle para armazenamento dos dados:
+#### 2.1 Obter Container Oracle
+docker run --name oracle_db_container -p 1521:1521 -e ORACLE_PWD=123@Troca -v oracle_db_data:/opt/oracle/oradata container-registry.oracle.com/database/free:latest
+
+#### 2.2 Após instalação, executar Container Docker e iniciar serviço SQLPlus
+docker exec -it --user oracle oracle_db_container bash
+sqlplus sys/"123@Troca"//localhost:1521/FREE as sysdba
+
+#### 2.3 Listar PDBs disponíveis
+SHOW PDBS;
+
+#### 2.4 Conectar no PDB correto (FREEPDB1)
+ALTER SESSION SET CONTAINER = FREEPDB1;
+
+#### 2.5 Confirmar que está no PDB certo
+SHOW CON_NAME;
+
+#### 2.6 Criar usuário LOCAL no PDB
+CREATE USER autos_code_dba IDENTIFIED BY "123@Troca" DEFAULT TABLESPACE USERS QUOTA UNLIMITED ON USERS;
+
+#### 2.7 Grants DBA completos no PDB
+GRANT DBA TO autos_code_dba;
+
+#### 2.8 Verificar criação
+SELECT username, account_status FROM dba_users WHERE username = 'AUTOS_CODE_DBA';
+
+
+
+3 - Com base no Dicionário de Dados (Data Overview), criar as tabelas no Banco de Dados Oracle;
+-- BRZ_ESTOQUE_PECAS
+CREATE TABLE BRZ_ESTOQUE_PECAS (
+    ID_ESTOQUE_PECA          NUMBER GENERATED BY DEFAULT AS IDENTITY,
+    COD_CONCESSIONARIA       VARCHAR2(10)   NOT NULL,
+    COD_FILIAL               VARCHAR2(10)   NOT NULL,
+    NOME_CONCESSIONARIA      VARCHAR2(100),
+    NOME_FILIAL              VARCHAR2(100),
+    MARCA_FILIAL             VARCHAR2(50),
+    VALOR_PECA_ESTOQUE       NUMBER(18,2),
+    QTDE_PECA_ESTOQUE        NUMBER(18,2),
+    DESCRICAO_PECA           VARCHAR2(200),
+    CATEGORIA_PECA           VARCHAR2(100),
+    DT_ULTIMA_VENDA_PECA     DATE,
+    DT_ULTIMA_ENTRADA_PECA   DATE,
+    PECA_OBSOLETA_FLAG       VARCHAR2(3),
+    TEMPO_OBSOLETA_DIAS      NUMBER(10),
+    MARCA_PECA               VARCHAR2(100),
+    CODIGO_PECA_ESTOQUE      VARCHAR2(50),
+    CONSTRAINT PK_BRZ_ESTOQUE_PECAS
+        PRIMARY KEY (ID_ESTOQUE_PECA)
+);
+
+-- Índices recomendados
+CREATE INDEX IX_BRZ_EST_PECAS_FILIAL
+    ON BRZ_ESTOQUE_PECAS (COD_CONCESSIONARIA, COD_FILIAL);
+
+CREATE INDEX IX_BRZ_EST_PECAS_CODIGO
+    ON BRZ_ESTOQUE_PECAS (CODIGO_PECA_ESTOQUE);
+
+
+
+-- BRZ_ESTOQUE_VEICULOS
+CREATE TABLE BRZ_ESTOQUE_VEICULOS (
+    ID_ESTOQUE_VEICULO        NUMBER GENERATED BY DEFAULT AS IDENTITY,
+    COD_CONCESSIONARIA        VARCHAR2(10)   NOT NULL,
+    COD_FILIAL                VARCHAR2(10)   NOT NULL,
+    NOME_CONCESSIONARIA       VARCHAR2(100),
+    NOME_FILIAL               VARCHAR2(100),
+    MARCA_FILIAL              VARCHAR2(50),
+    CUSTO_VEICULO             NUMBER(18,2),
+    MARCA_VEICULO             VARCHAR2(50),
+    MODELO_VEICULO            VARCHAR2(100),
+    COR_VEICULO               VARCHAR2(50),
+    VEICULO_NOVO_SEMINOVO     VARCHAR2(20),
+    TIPO_COMBUSTIVEL          VARCHAR2(30),
+    ANO_MODELO                NUMBER(4),
+    ANO_FABRICACAO            NUMBER(4),
+    CHASSI_VEICULO            VARCHAR2(50),
+    TEMPO_TOTAL_ESTOQUE_DIAS  NUMBER(10),
+    KM_ATUAL                  NUMBER(10),
+    PLACA_VEICULO             VARCHAR2(20),
+    DT_ENTRADA_ESTOQUE        DATE,
+    CONSTRAINT PK_BRZ_ESTOQUE_VEICULOS
+        PRIMARY KEY (ID_ESTOQUE_VEICULO),
+    CONSTRAINT UQ_BRZ_EST_VEICULOS_CHASSI
+        UNIQUE (CHASSI_VEICULO)
+);
+
+-- Índices
+CREATE INDEX IX_BRZ_EST_VEIC_FILIAL
+    ON BRZ_ESTOQUE_VEICULOS (COD_CONCESSIONARIA, COD_FILIAL);
+
+CREATE INDEX IX_BRZ_EST_VEIC_MODELO
+    ON BRZ_ESTOQUE_VEICULOS (MARCA_VEICULO, MODELO_VEICULO);
+
+
+
+
+-- BRZ_HIST_SERVICOS
+CREATE TABLE BRZ_HIST_SERVICOS (
+    ID_SERVICO                 NUMBER GENERATED BY DEFAULT AS IDENTITY,
+    COD_CONCESSIONARIA         VARCHAR2(10)   NOT NULL,
+    COD_FILIAL                 VARCHAR2(10)   NOT NULL,
+    NOME_CONCESSIONARIA        VARCHAR2(100),
+    NOME_FILIAL                VARCHAR2(100),
+    DT_REALIZACAO_SERVICO      DATE           NOT NULL,
+    QTDE_SERVICOS              NUMBER(10),
+    VALOR_TOTAL_SERVICO        NUMBER(18,2),
+    LUCRO_SERVICO              NUMBER(18,2),
+    DESCRICAO_SERVICO          VARCHAR2(200),
+    SECAO_SERVICO              VARCHAR2(100),
+    DEPARTAMENTO_SERVICO       VARCHAR2(100),
+    CATEGORIA_SERVICO          VARCHAR2(100),
+    NOME_VENDEDOR_SERVICO      VARCHAR2(100),
+    NOME_MECANICO              VARCHAR2(100),
+    NOME_CLIENTE               VARCHAR2(150),
+    CONSTRAINT PK_BRZ_HIST_SERVICOS
+        PRIMARY KEY (ID_SERVICO)
+);
+
+-- Índices (alto volume de linhas)
+CREATE INDEX IX_BRZ_SERV_FILIAL_DATA
+    ON BRZ_HIST_SERVICOS (COD_CONCESSIONARIA, COD_FILIAL, DT_REALIZACAO_SERVICO);
+
+CREATE INDEX IX_BRZ_SERV_DEPARTAMENTO
+    ON BRZ_HIST_SERVICOS (DEPARTAMENTO_SERVICO);
+
+CREATE INDEX IX_BRZ_SERV_VENDEDOR
+    ON BRZ_HIST_SERVICOS (NOME_VENDEDOR_SERVICO);
+
+
+
+-- BRZ_HIST_VENDAS_PECAS
+CREATE TABLE BRZ_HIST_VENDAS_PECAS (
+    ID_VENDA_PECA              NUMBER GENERATED BY DEFAULT AS IDENTITY,
+    COD_CONCESSIONARIA         VARCHAR2(10)   NOT NULL,
+    COD_FILIAL                 VARCHAR2(10)   NOT NULL,
+    NOME_CONCESSIONARIA        VARCHAR2(100),
+    NOME_FILIAL                VARCHAR2(100),
+    MARCA_FILIAL               VARCHAR2(50),
+    DT_VENDA                   DATE           NOT NULL,
+    QTDE_VENDIDA               NUMBER(18,2),
+    TIPO_TRANSACAO             VARCHAR2(50),
+    VALOR_VENDA                NUMBER(18,2),
+    CUSTO_PECA                 NUMBER(18,2),
+    LUCRO_VENDA                NUMBER(18,2),
+    MARGEM_VENDA               NUMBER(9,4),
+    DESCRICAO_PECA             VARCHAR2(200),
+    CATEGORIA_PECA             VARCHAR2(100),
+    DEPARTAMENTO_VENDA         VARCHAR2(100),
+    TIPO_VENDA_PECA            VARCHAR2(100),
+    NOME_VENDEDOR              VARCHAR2(100),
+    NOME_COMPRADOR             VARCHAR2(150),
+    CIDADE_VENDA               VARCHAR2(100),
+    ESTADO_VENDA               VARCHAR2(50),
+    MACROREGIAO_VENDA          VARCHAR2(50),
+    CONSTRAINT PK_BRZ_HIST_VENDAS_PECAS
+        PRIMARY KEY (ID_VENDA_PECA)
+);
+
+-- FKs lógicas (mesmo que Bronze não valide fisicamente, já deixa pronto)
+-- Ex.: para futura Dim_Peca (SILVER/GOLD), o join será por DESCRICAO/CATEGORIA
+-- e para filial por COD_CONCESSIONARIA/COD_FILIAL. [file:2]
+
+-- Índices (tabela de maior volume)
+CREATE INDEX IX_BRZ_VP_FILIAL_DATA
+    ON BRZ_HIST_VENDAS_PECAS (COD_CONCESSIONARIA, COD_FILIAL, DT_VENDA);
+
+CREATE INDEX IX_BRZ_VP_PECA
+    ON BRZ_HIST_VENDAS_PECAS (DESCRICAO_PECA, CATEGORIA_PECA);
+
+CREATE INDEX IX_BRZ_VP_VENDEDOR
+    ON BRZ_HIST_VENDAS_PECAS (NOME_VENDEDOR);
+
+CREATE INDEX IX_BRZ_VP_CIDADE_ESTADO
+    ON BRZ_HIST_VENDAS_PECAS (ESTADO_VENDA, CIDADE_VENDA);
+
+
+
+-- BRZ_HIST_VENDAS_VEICULOS
+CREATE TABLE BRZ_HIST_VENDAS_VEICULOS (
+    ID_VENDA_VEICULO           NUMBER GENERATED BY DEFAULT AS IDENTITY,
+    COD_CONCESSIONARIA         VARCHAR2(10)   NOT NULL,
+    COD_FILIAL                 VARCHAR2(10)   NOT NULL,
+    NOME_CONCESSIONARIA        VARCHAR2(100),
+    NOME_FILIAL                VARCHAR2(100),
+    MARCA_FILIAL               VARCHAR2(50),
+    DT_VENDA                   DATE           NOT NULL,
+    QTDE_VENDIDA               NUMBER(10),
+    TIPO_TRANSACAO             VARCHAR2(50),
+    VALOR_VENDA                NUMBER(18,2),
+    CUSTO_VEICULO              NUMBER(18,2),
+    LUCRO_VENDA                NUMBER(18,2),
+    MARGEM_VENDA               NUMBER(9,4),
+    MARCA_VEICULO              VARCHAR2(50),
+    MODELO_VEICULO             VARCHAR2(100),
+    FAMILIA_VEICULO            VARCHAR2(100),
+    CATEGORIA_VEICULO          VARCHAR2(100),
+    COR_VEICULO                VARCHAR2(50),
+    VEICULO_NOVO_SEMINOVO      VARCHAR2(20),
+    TIPO_COMBUSTIVEL           VARCHAR2(30),
+    ANO_MODELO                 NUMBER(4),
+    ANO_FABRICACAO             NUMBER(4),
+    CHASSI_VEICULO             VARCHAR2(50),
+    DIAS_EM_ESTOQUE            NUMBER(10),
+    TIPO_VENDA_VEICULO         VARCHAR2(100),
+    NOME_VENDEDOR              VARCHAR2(100),
+    NOME_COMPRADOR             VARCHAR2(150),
+    CIDADE_VENDA               VARCHAR2(100),
+    ESTADO_VENDA               VARCHAR2(50),
+    MACROREGIAO_VENDA          VARCHAR2(50),
+    CONSTRAINT PK_BRZ_HIST_VENDAS_VEIC
+        PRIMARY KEY (ID_VENDA_VEICULO)
+);
+
+-- Índices
+CREATE INDEX IX_BRZ_VV_FILIAL_DATA
+    ON BRZ_HIST_VENDAS_VEICULOS (COD_CONCESSIONARIA, COD_FILIAL, DT_VENDA);
+
+CREATE INDEX IX_BRZ_VV_MARCA_MODELO
+    ON BRZ_HIST_VENDAS_VEICULOS (MARCA_VEICULO, MODELO_VEICULO);
+
+CREATE INDEX IX_BRZ_VV_CHASSI
+    ON BRZ_HIST_VENDAS_VEICULOS (CHASSI_VEICULO);
+
+CREATE INDEX IX_BRZ_VV_VENDEDOR
+    ON BRZ_HIST_VENDAS_VEICULOS (NOME_VENDEDOR);
+
+
+4 - Desenvolvimento de automações para ETL dos dados, em Python
+	-> Indexados no final do Arquivo;
+	-> Disponíveis no Github;
+
+5 - Desenvolvimento de Agente de IA (LLM - OpenAI) para análise dos dados armazenados:
+	-> Através de Langchain, conforme sugerido
+	-> Indexados no final do Arquivo;
+	-> Disponíveis no Github;
+	-> Para validação, fiz algumas perguntas (prints)
+
+6 - Desenvolvimento de visualizações interativas:
+	-> Através de Streamlit, conforme sugerido;
+	-> Indexados no final do Arquivo;
+	-> Disponíveis no Github;
+	-> Inserir prints das telas;
+
+
+Estrutura do Projeto:
+
+etl_autos_code/
+│
+├── agents/
+│   ├── data_analyst_agent.py											# Definição do agente de IA, utilizando Langchain e API OpenAI
+│   └── sql_oracle_tool.py												# Conector ao Banco de Dados, através da oracle_connector, para o acesso do Agente
+│
+├── bases/																# Pasta com as bases, para consumo das automações ETL
+│   ├── estoque-atual-de-pecas.csv										# Current Parts Inventory (estoque-atual-de-pecas.csv)
+│   ├── estoque-atual-de-veículos.csv									# Current Vehicle Inventory (estoque-atual-de-veiculos.csv)
+│   ├── historico-de-servicos-realizados.csv							# Service History (historico-de-servicos-realizados.csv)
+│   ├── historico-de-vendas-de-pecas.csv								# Sales History of Parts (historico-de-vendas-de-peças.csv)
+│   └── historico-de-vendas-de-veiculos.csv							# Sales History of Vehicles (historico-de-vendas-de-veiculos.csv)
+│
+├── config/
+│   ├── database.ini													# IP, banco, usuário, senha, schema							
+│   ├── load_oai_env.py												# Código para leitura do arquivo de ambiente, com API-key da OpenAI
+│   └── oai.env														# Arquivo de ambiente, com API-key da OpenAI
+│
+├── connector/
+│   ├── __init__.py.py   	   											# Vazia														
+│   └── oracle_connector.py  											# Classe OracleConnector (conexão única)						
+│
+├── models/
+│   └── models.py             											# Estruturas de tabelas das bases, como Dicionário de Dados para o Banco
+│
+├── controllers/
+│   ├── estoque_pecas_controller.py									# ETL das bases Current Parts Inventory (estoque-atual-de-pecas.csv)
+│   ├── estoque_veiculos_controller.py									# ETL das bases Current Vehicle Inventory (estoque-atual-de-veiculos.csv)
+│   ├── hist_servicos_controller.py									# ETL das bases Service History (historico-de-servicos-realizados.csv)
+│   ├── hist_vendas_pecas_controller.py								# ETL das bases Sales History of Parts (historico-de-vendas-de-peças.csv)
+│   └── hist_vendas_veiculos_controller.py								# ETL das bases Sales History of Vehicles (historico-de-vendas-de-veiculos.csv)
+│
+├── views/
+│   ├── estoque_pecas_view.py											# View das bases Current Parts Inventory (estoque-atual-de-pecas.csv)
+│   ├── estoque_veiculos_view.py										# View das bases Current Vehicle Inventory (estoque-atual-de-veiculos.csv)
+│   ├── hist_servicos_view.py											# View das bases Service History (historico-de-servicos-realizados.csv)
+│   ├── hist_vendas_pecas_view.py										# View das bases Sales History of Parts (historico-de-vendas-de-peças.csv)
+│   └── hist_vendas_veiculos_view.py									# View das bases Sales History of Vehicles (historico-de-vendas-de-veiculos.csv)
+│
+├── mains/
+│   ├── main_estoque_pecas.py											# Main para executar carga das bases Current Parts Inventory (estoque-atual-de-pecas.csv)
+│   ├── main_estoque_veiculos.py										# Main para executar carga das bases Current Vehicle Inventory (estoque-atual-de-veiculos.csv)
+│   ├── main_hist_servicos.py											# Main para executar carga das bases Service History (historico-de-servicos-realizados.csv)
+│   ├── main_hist_vendas_pecas.py										# Main para executar carga das bases Sales History of Parts (historico-de-vendas-de-peças.csv)
+│   ├── main_hist_vendas_veiculos.py									# Main para executar carga das bases Sales History of Vehicles (historico-de-vendas-de-veiculos.csv)
+│   └── main_llm_agent.py												# Main para executar o agente LLM
+│
+├── logs/
+│   ├── csv_handler.txt												# Log de csv_handler
+│   ├── EstoquePecasController.txt										# Log de EstoquePecas
+│   ├── EstoqueVeiculosController.txt									# Log de EstoqueVeiculos
+│   ├── HistServicosController.txt										# Log de HistServicos
+│   ├── HistVendasPecas.txt											# Log de HistVendasPecas
+│   ├── HistVendasVeiculos.txt											# Log de HistVendasVeiculos
+│   └── OracleConnector.py	 	            							# Log de OracleConnector
+│
+├── sql/
+│   ├── BRONZE - CREATE TABLE BRZ_ESTOQUE_PECAS.sql					# Query para criação da tabela BRZ_ESTOQUE_PECAS
+│   ├── BRONZE - CREATE TABLE BRZ_ESTOQUE_VEICULOS.sql					# Query para criação da tabela BRZ_ESTOQUE_VEICULOS
+│   ├── BRONZE - CREATE TABLE BRZ_HIST_SERVICOS.sql					# Query para criação da tabela BRZ_HIST_SERVICOS
+│   ├── BRONZE - CREATE TABLE BRZ_HIST_VENDAS_PECAS.sql				# Query para criação da tabela BRZ_HIST_VENDAS_PECAS
+│   └── BRONZE - CREATE TABLE BRZ_HIST_VENDAS_VEICULOS.sql				# Query para criação da tabela BRZ_HIST_VENDAS_VEICULOS
+│
+├── streamlit_app/
+│   ├── app.py															# Raiz do Projeto, funciona como Main
+│
+│   ├── auth/
+│			├── __init__.py.py   	   									# Vazia		
+│		   	└── auth_services.py										# Implementar, futuramente, Autenticação por Login e Senha
+│
+│   ├── config/
+│		   	└── config.ini												# Implementar, futuramente, Autenticação por Login e Senha
+│
+│   ├── repositories/
+│   		├── __init__.py.py   	   # Vazia		
+│   		├── base_repo.py											# Repositório para as consultas Base para todas as demais
+│   		├── kpi_repository.py										# Repositório para as consultas dos KPIs da página inicial
+│   		├── rentabilidade_integrada_repository.py					# Repositório para as consultas da página Rentabilidade Integrada
+│   		├── pos_vendas_repository.py								# Repositório para as consultas da página Pós-Vendas
+│   		├── performance_filial_repository.py						# Repositório para as consultas da página Performance Filial
+│   		├── clientes_repository.py									# Repositório para as consultas da página Clientes
+│   		├── dashboard_operacional_repository.py					# Repositório para as consultas da página DASHBOARD - Operacional
+│   		├── dashboard_analitico_repository.py						# Repositório para as consultas da página DASHBOARD - Analítico
+│		   	└── dashboard_preditivo_repository.py						# Repositório para as consultas da página DASHBOARD - Preditivo
+│
+│   ├── services/
+│		   	└── kpi_service.py
+│
+│   ├── views/
+│   		├── home_view.py											# Criação dos visuais da Página Inicial (Home)
+│   		├── rentabilidade_integrada_view.py						# Criação dos visuais da página Rentabilidade Integrada
+│   		├── pos_vendas_view.py										# Criação dos visuais da página Pós-Vendas
+│   		├── performance_filial_view.py								# Criação dos visuais da página Performance Filial
+│   		├── clientes_view.py										# Criação dos visuais da página Clientes
+│   		├── dashboard_operacional_view.py							# Criação dos visuais da página DASHBOARD - Operacional
+│   		├── dashboard_analitico_view.py							# Criação dos visuais da página DASHBOARD - Analítico
+│		   	└── dashboard_preditivo_view.py							# Criação dos visuais da página DASHBOARD - Preditivo
+│
+├── utils/
+│   └── __init__.py.py   	   											# Vazia														
+│   ├── csv_handler.py        											# Tratamento de Arquivos .CSV. Detecta "," e ";" automaticamente							
+│   └── logger_controller.py             								# Logging centralizado							
+│
+├── requirements.txt
+└── README.md
+
+
+Comando para rodar Streamlit:
+streamlit run streamlit_app/app.py
